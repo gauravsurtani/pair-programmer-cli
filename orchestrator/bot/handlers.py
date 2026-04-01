@@ -42,24 +42,103 @@ def _username(msg: Message) -> str:
 @router.message(CommandStart())
 async def cmd_start(msg: Message) -> None:
     await msg.reply(
-        "Orchestrator ready.\n\n"
-        "PAIR MODE (shared session):\n"
-        "/pair <task> — start pair session\n"
-        "/join — join active session\n"
-        "/driver @user — set driver\n"
-        "/both — let everyone talk\n"
-        "/handoff — swap driver\n"
-        "/checkpoint [msg] — commit\n"
-        "/endpair — push + PR + cleanup\n\n"
-        "SPLIT MODE (solo sessions):\n"
-        "/claim <task> — start solo session\n"
-        "/status — show all sessions\n"
-        "/park — pause session\n"
-        "/resume — restart session\n"
-        "/merge — create PR and cleanup\n"
-        "/sync — rebase on main\n"
-        "/kill — force-stop session"
+        "Hey! I'm your pair programming bot. "
+        "I let you and a teammate share one AI coding session — no git headaches.\n\n"
+        "Quick start: /pair my-feature\n"
+        "Full guide: /help"
     )
+
+
+@router.message(Command("help"))
+async def cmd_help(msg: Message) -> None:
+    text = (msg.text or "").strip()
+    parts = text.split(maxsplit=1)
+    topic = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    if topic == "pair":
+        await msg.reply(
+            "PAIR MODE — shared AI session\n\n"
+            "Start a session:\n"
+            "  /pair my-feature\n\n"
+            "Your teammate joins:\n"
+            "  /join\n\n"
+            "Now both of you just type messages — the AI sees who said what.\n\n"
+            "Pick issues to work on:\n"
+            "  /issues — see open GitHub issues\n"
+            "  /pick #12 — claim an issue\n"
+            "  /done — auto-commit and close your issue\n\n"
+            "Hand off context:\n"
+            "  /handoff — AI summarizes your work, passes it to your teammate\n\n"
+            "Control who talks:\n"
+            "  /driver @user — only that person can talk to AI\n"
+            "  /both — everyone can talk (default)\n\n"
+            "Save progress:\n"
+            "  /checkpoint [msg] — commit without ending\n"
+            "  /endpair — push, create PR, cleanup\n\n"
+            "Leave anytime:\n"
+            "  /leave — exit without ending the session"
+        )
+    elif topic == "split":
+        await msg.reply(
+            "SPLIT MODE — solo sessions\n\n"
+            "Each person gets their own AI session on their own branch.\n\n"
+            "  /claim my-task — start a solo session\n"
+            "  /status — see all active sessions\n"
+            "  /park — pause (saves context)\n"
+            "  /resume — pick up where you left off\n"
+            "  /sync — rebase on main\n"
+            "  /merge — push + create PR + cleanup\n"
+            "  /kill — force-stop and remove"
+        )
+    elif topic == "flow":
+        await msg.reply(
+            "TYPICAL SESSION FLOW\n\n"
+            "1. You: /pair auth-system\n"
+            "2. Teammate: /join\n"
+            "3. You: /issues\n"
+            "   Bot shows open GitHub issues\n"
+            "4. You: /pick #12\n"
+            "   Teammate: /pick #15\n"
+            "5. You type: \"build the login API\"\n"
+            "   AI builds it. Bot posts what files changed.\n"
+            "6. You: /done\n"
+            "   AI auto-commits with issue reference.\n"
+            "7. You: /handoff\n"
+            "   AI summarizes your work for teammate.\n"
+            "8. When done: /endpair\n"
+            "   Pushes branch, creates PR, cleans up."
+        )
+    elif topic == "tips":
+        await msg.reply(
+            "TIPS\n\n"
+            "Works solo — /pair works with just 1 person. "
+            "Teammate can /join later anytime.\n\n"
+            "File ownership — the bot tracks who's editing what. "
+            "If you touch a file your teammate owns, it warns you.\n\n"
+            "Diff summaries — after every AI change, the bot posts "
+            "which files changed so everyone stays in sync.\n\n"
+            "Context is preserved — /handoff doesn't just swap who types. "
+            "The AI generates a full summary of what was done, "
+            "what worked, and what's left.\n\n"
+            "No git commands needed — the bot handles branches, "
+            "commits, pushes, and PRs for you."
+        )
+    else:
+        await msg.reply(
+            "PAIR PROGRAMMER — share AI coding sessions\n\n"
+            "COMMANDS\n"
+            "  /help pair — pair mode commands\n"
+            "  /help split — solo mode commands\n"
+            "  /help flow — walkthrough of a typical session\n"
+            "  /help tips — pro tips\n\n"
+            "QUICK START\n"
+            "  1. /pair my-feature — start a session\n"
+            "  2. Teammate sends /join\n"
+            "  3. Both of you type messages — AI sees who said what\n"
+            "  4. /issues to see tasks, /pick #N to claim one\n"
+            "  5. /done when finished, /endpair to wrap up\n\n"
+            "That's it. No git branches, no merge conflicts, no setup."
+        )
 
 
 @router.message(Command("claim"))
