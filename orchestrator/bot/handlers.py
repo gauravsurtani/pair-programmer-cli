@@ -4,7 +4,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 
 from orchestrator.activity.feed import broadcast
 from orchestrator.bot.formatters import chunk_message, format_response, format_status
@@ -41,11 +41,21 @@ def _username(msg: Message) -> str:
 
 @router.message(CommandStart())
 async def cmd_start(msg: Message) -> None:
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Start Pair Session", callback_data="action:pair"),
+            InlineKeyboardButton(text="Start Solo Session", callback_data="action:solo"),
+        ],
+        [
+            InlineKeyboardButton(text="View Issues", callback_data="action:issues"),
+            InlineKeyboardButton(text="Session Status", callback_data="action:status"),
+        ],
+        [InlineKeyboardButton(text="Help Guide", callback_data="help:main")],
+    ])
     await msg.reply(
-        "Hey! I'm your pair programming bot. "
-        "I let you and a teammate share one AI coding session — no git headaches.\n\n"
-        "Quick start: /pair my-feature\n"
-        "Full guide: /help"
+        "Hey! I'm your pair programming bot.\n"
+        "Share one AI coding session with your teammate — no git headaches.",
+        reply_markup=kb,
     )
 
 
@@ -53,24 +63,31 @@ async def cmd_start(msg: Message) -> None:
 async def cmd_help(msg: Message) -> None:
     await msg.reply(
         "PAIR PROGRAMMER — share AI coding sessions\n\n"
-        "GUIDES\n"
-        "  /help-pair — pair mode commands\n"
-        "  /help-split — solo mode commands\n"
-        "  /help-flow — walkthrough of a typical session\n"
-        "  /help-tips — pro tips\n\n"
-        "QUICK START\n"
-        "  1. /pair my-feature — start a session\n"
-        "  2. Teammate sends /join\n"
-        "  3. Both of you type messages — AI sees who said what\n"
-        "  4. /issues to see tasks, /pick #N to claim one\n"
-        "  5. /done when finished, /endpair to wrap up\n\n"
-        "That's it. No git branches, no merge conflicts, no setup."
+        "Pick a topic:",
+        reply_markup=_help_keyboard(),
     )
 
 
-@router.message(Command("help-pair"))
-async def cmd_help_pair(msg: Message) -> None:
-    await msg.reply(
+def _help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Pair Mode", callback_data="help:pair"),
+            InlineKeyboardButton(text="Solo Mode", callback_data="help:split"),
+        ],
+        [
+            InlineKeyboardButton(text="Session Flow", callback_data="help:flow"),
+            InlineKeyboardButton(text="Pro Tips", callback_data="help:tips"),
+        ],
+        [InlineKeyboardButton(text="Quick Start", callback_data="help:quickstart")],
+    ])
+
+
+_HELP_TEXTS = {
+    "main": (
+        "PAIR PROGRAMMER — share AI coding sessions\n\n"
+        "Pick a topic:"
+    ),
+    "pair": (
         "PAIR MODE — shared AI session\n\n"
         "Start a session:\n"
         "  /pair my-feature\n\n"
@@ -91,12 +108,8 @@ async def cmd_help_pair(msg: Message) -> None:
         "  /endpair — push, create PR, cleanup\n\n"
         "Leave anytime:\n"
         "  /leave — exit without ending the session"
-    )
-
-
-@router.message(Command("help-split"))
-async def cmd_help_split(msg: Message) -> None:
-    await msg.reply(
+    ),
+    "split": (
         "SPLIT MODE — solo sessions\n\n"
         "Each person gets their own AI session on their own branch.\n\n"
         "  /claim my-task — start a solo session\n"
@@ -106,12 +119,8 @@ async def cmd_help_split(msg: Message) -> None:
         "  /sync — rebase on main\n"
         "  /merge — push + create PR + cleanup\n"
         "  /kill — force-stop and remove"
-    )
-
-
-@router.message(Command("help-flow"))
-async def cmd_help_flow(msg: Message) -> None:
-    await msg.reply(
+    ),
+    "flow": (
         "TYPICAL SESSION FLOW\n\n"
         "1. You: /pair auth-system\n"
         "2. Teammate: /join\n"
@@ -127,12 +136,8 @@ async def cmd_help_flow(msg: Message) -> None:
         "   AI summarizes your work for teammate.\n"
         "8. When done: /endpair\n"
         "   Pushes branch, creates PR, cleans up."
-    )
-
-
-@router.message(Command("help-tips"))
-async def cmd_help_tips(msg: Message) -> None:
-    await msg.reply(
+    ),
+    "tips": (
         "TIPS\n\n"
         "Works solo — /pair works with just 1 person. "
         "Teammate can /join later anytime.\n\n"
@@ -145,7 +150,60 @@ async def cmd_help_tips(msg: Message) -> None:
         "what worked, and what's left.\n\n"
         "No git commands needed — the bot handles branches, "
         "commits, pushes, and PRs for you."
-    )
+    ),
+    "quickstart": (
+        "QUICK START\n\n"
+        "1. /pair my-feature — start a session\n"
+        "2. Teammate sends /join\n"
+        "3. Both of you type messages — AI sees who said what\n"
+        "4. /issues to see tasks, /pick #N to claim one\n"
+        "5. /done when finished, /endpair to wrap up\n\n"
+        "That's it. No git branches, no merge conflicts, no setup."
+    ),
+}
+
+
+@router.callback_query(F.data.startswith("help:"))
+async def cb_help(callback: CallbackQuery) -> None:
+    topic = callback.data.split(":", 1)[1]
+    text = _HELP_TEXTS.get(topic, _HELP_TEXTS["main"])
+    kb = _help_keyboard() if topic != "main" else None
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="< Back to Help", callback_data="help:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=back_kb if topic != "main" else _help_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("action:"))
+async def cb_action(callback: CallbackQuery) -> None:
+    action = callback.data.split(":", 1)[1]
+
+    if action == "pair":
+        await callback.message.reply(
+            "To start a pair session, send:\n\n"
+            "/pair your-task-name\n\n"
+            "Example: /pair login-feature"
+        )
+    elif action == "solo":
+        await callback.message.reply(
+            "To start a solo session, send:\n\n"
+            "/claim your-task-name\n\n"
+            "Example: /claim fix-navbar"
+        )
+    elif action == "issues":
+        await callback.message.reply("Fetching issues...")
+        # Trigger the /issues command logic
+        if _session_mgr:
+            await callback.message.reply("Send /issues to see open GitHub issues.")
+    elif action == "status":
+        if _session_mgr:
+            sessions = _session_mgr.get_all_sessions()
+            await callback.message.reply(format_status(sessions))
+        else:
+            await callback.message.reply("No sessions active.")
+
+    await callback.answer()
 
 
 @router.message(Command("claim"))
