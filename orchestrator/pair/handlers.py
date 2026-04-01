@@ -264,6 +264,51 @@ async def cmd_handoff(msg: Message) -> None:
         await msg.reply(chunk)
 
 
+@pair_router.message(Command("session-info"))
+async def cmd_session_info(msg: Message) -> None:
+    assert _pair_mgr
+
+    session = _pair_mgr.get_session(_chat_id(msg))
+    if not session:
+        await msg.reply("No pair session active.")
+        return
+
+    proc = _pair_mgr._processes.get(_chat_id(msg))
+    sid = proc.session_id if proc else None
+
+    lines = [
+        f"Task: {session.task_name}",
+        f"Branch: {session.branch}",
+        f"Worktree: {session.worktree_path}",
+        f"Mode: {session.mode}",
+        f"Members: {session.member_list_str()}",
+        f"Cost: ${session.total_cost_usd:.2f}",
+        f"Claude session: {sid or 'not started yet'}",
+    ]
+
+    if session.active_issues:
+        issue_lines = []
+        for num, uid in session.active_issues.items():
+            member = session.members.get(uid)
+            name = f"@{member.username}" if member else "?"
+            issue_lines.append(f"  #{num} -> {name}")
+        lines.append("Active issues:\n" + "\n".join(issue_lines))
+
+    if session.file_ownership:
+        owned = {}
+        for fp, uid in session.file_ownership.items():
+            member = session.members.get(uid)
+            name = f"@{member.username}" if member else "?"
+            owned.setdefault(name, []).append(fp)
+        for name, files in owned.items():
+            lines.append(f"Files owned by {name}: {', '.join(files)}")
+
+    if sid:
+        lines.append(f"\nResume from terminal:\n  claude --resume {sid}")
+
+    await msg.reply("\n".join(lines))
+
+
 @pair_router.message(Command("checkpoint"))
 async def cmd_checkpoint(msg: Message) -> None:
     assert _pair_mgr
