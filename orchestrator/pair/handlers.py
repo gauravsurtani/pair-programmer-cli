@@ -309,6 +309,98 @@ async def cmd_session_info(msg: Message) -> None:
     await msg.reply("\n".join(lines))
 
 
+@pair_router.message(Command("undo"))
+async def cmd_undo(msg: Message) -> None:
+    assert _pair_mgr
+
+    session = _pair_mgr.get_session(_chat_id(msg))
+    if not session:
+        await msg.reply("No pair session active.")
+        return
+
+    await msg.reply("Reverting last change...")
+
+    proc = _pair_mgr._processes.get(_chat_id(msg))
+    if not proc:
+        await msg.reply("Session has no process.")
+        return
+
+    result = await proc.send_message(
+        "Revert the last commit using `git revert HEAD --no-edit`. "
+        "Show what was undone."
+    )
+
+    for chunk in chunk_message(result or "Reverted."):
+        await msg.reply(chunk)
+
+
+@pair_router.message(Command("test"))
+async def cmd_test(msg: Message) -> None:
+    assert _pair_mgr
+
+    session = _pair_mgr.get_session(_chat_id(msg))
+    if not session:
+        await msg.reply("No pair session active.")
+        return
+
+    text = (msg.text or "").strip()
+    parts = text.split(maxsplit=1)
+    test_args = parts[1] if len(parts) > 1 else ""
+
+    await msg.reply("Running tests...")
+
+    proc = _pair_mgr._processes.get(_chat_id(msg))
+    if not proc:
+        await msg.reply("Session has no process.")
+        return
+
+    if test_args:
+        prompt = f"Run this test command and show results: {test_args}"
+    else:
+        prompt = (
+            "Detect the test framework in this project and run the tests. "
+            "Show a summary: how many passed, failed, and any failure details. "
+            "Keep output concise."
+        )
+
+    result = await proc.send_message(prompt)
+
+    for chunk in chunk_message(f"Test results:\n{result}"):
+        await msg.reply(chunk)
+
+
+@pair_router.message(Command("code"))
+async def cmd_code(msg: Message) -> None:
+    assert _pair_mgr
+
+    session = _pair_mgr.get_session(_chat_id(msg))
+    if not session:
+        await msg.reply("No pair session active.")
+        return
+
+    text = (msg.text or "").strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await msg.reply("Usage: /code path/to/file.py [start_line-end_line]")
+        return
+
+    file_arg = parts[1].strip()
+
+    proc = _pair_mgr._processes.get(_chat_id(msg))
+    if not proc:
+        await msg.reply("Session has no process.")
+        return
+
+    result = await proc.send_message(
+        f"Show the contents of the file: {file_arg}. "
+        "Output the file contents with line numbers. Keep it concise — "
+        "if the file is over 100 lines, show the first 50 and last 20 with a note about skipped lines."
+    )
+
+    for chunk in chunk_message(result or "File not found."):
+        await msg.reply(chunk)
+
+
 @pair_router.message(Command("checkpoint"))
 async def cmd_checkpoint(msg: Message) -> None:
     assert _pair_mgr
