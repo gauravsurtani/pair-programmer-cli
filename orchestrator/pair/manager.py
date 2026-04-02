@@ -161,12 +161,25 @@ class PairManager:
         # Parse file changes from tool events
         changes = parse_tool_events(proc.last_tool_events, session.worktree_path)
 
+        # Check for file ownership conflicts before updating
+        changed_paths = [c.filepath for c in changes]
+        conflicts = session.check_conflicts(changed_paths, user_id)
+
         # Update file ownership
         for change in changes:
             session.set_file_owner(change.filepath, user_id)
 
         # Format diff summary
         diff = format_diff_summary(changes, username)
+
+        # Append conflict warnings
+        if conflicts:
+            warnings = ["\nFile ownership conflicts:"]
+            for filepath, owner_id in conflicts:
+                owner = session.members.get(owner_id)
+                owner_name = f"@{owner.username}" if owner else "?"
+                warnings.append(f"  {filepath} — owned by {owner_name}")
+            diff += "\n".join(warnings)
 
         await self._save(chat_id)
         return response, diff
