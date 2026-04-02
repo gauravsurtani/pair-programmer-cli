@@ -71,7 +71,14 @@ class ClaudeProcess:
             cwd=self.worktree_path,
         )
 
-        assistant_text = await self._read_response()
+        try:
+            assistant_text = await asyncio.wait_for(
+                self._read_response(), timeout=config.CLAUDE_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Claude process timed out after %ss for task %s", config.CLAUDE_TIMEOUT_SECONDS, self.task_name)
+            await self.kill()
+            return "[Claude timed out after 120 seconds. Try again or use /checkpoint to save progress.]"
 
         await self._proc.wait()
         self._proc = None

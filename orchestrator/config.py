@@ -27,6 +27,7 @@ MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "5"))
 SESSION_BUDGET_USD = float(os.getenv("SESSION_BUDGET_USD", "5.0"))
 IDLE_TIMEOUT_SECONDS = int(os.getenv("IDLE_TIMEOUT_SECONDS", "600"))
 MAX_CRASH_RETRIES = int(os.getenv("MAX_CRASH_RETRIES", "3"))
+CLAUDE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_TIMEOUT_SECONDS", "120"))
 ALLOWED_CHAT_IDS: set[int] = set()
 
 _raw = os.getenv("ALLOWED_CHAT_IDS", "")
