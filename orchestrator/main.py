@@ -58,6 +58,9 @@ async def main() -> None:
     await session_mgr.restore_from_db()
 
     pair_mgr = PairManager(db=db, worktree_mgr=wt_mgr)
+    restored = await pair_mgr.restore_pair_sessions()
+    if restored:
+        logger.info("Restored %d pair sessions", restored)
 
     # Pair mode handlers registered FIRST — they take priority for message routing.
     # If no pair session is active, messages fall through to split mode.

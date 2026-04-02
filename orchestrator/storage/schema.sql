@@ -12,3 +12,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     max_budget_usd REAL DEFAULT 5.0,
     error_count INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS pair_sessions (
+    chat_id INTEGER PRIMARY KEY,
+    task_name TEXT UNIQUE NOT NULL,
+    branch TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    driver_id INTEGER,
+    mode TEXT NOT NULL DEFAULT 'both',
+    created_at TEXT NOT NULL,
+    last_activity TEXT NOT NULL,
+    total_cost_usd REAL DEFAULT 0.0,
+    claude_session_id TEXT,
+    members_json TEXT NOT NULL DEFAULT '{}',
+    file_ownership_json TEXT NOT NULL DEFAULT '{}',
+    active_issues_json TEXT NOT NULL DEFAULT '{}',
+    handoff_history_json TEXT NOT NULL DEFAULT '[]'
+);

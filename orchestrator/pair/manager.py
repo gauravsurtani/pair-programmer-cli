@@ -31,6 +31,16 @@ class PairManager:
     def get_session(self, chat_id: int) -> PairSession | None:
         return self._sessions.get(chat_id)
 
+    async def _save(self, chat_id: int) -> None:
+        """Persist pair session to database."""
+        session = self._sessions.get(chat_id)
+        if not session:
+            return
+        proc = self._processes.get(chat_id)
+        claude_sid = proc.session_id if proc else None
+        from orchestrator.storage.db import save_pair_session
+        await save_pair_session(self.db, chat_id, session, claude_sid)
+
     async def start_pair(
         self, chat_id: int, task_name: str, user_id: int, username: str
     ) -> PairSession:
@@ -60,6 +70,7 @@ class PairManager:
         self._sessions[chat_id] = session
         self._processes[chat_id] = proc
         logger.info("Pair session started: %s by @%s", task_name, username)
+        await self._save(chat_id)
         return session
 
     async def join_pair(
@@ -74,6 +85,7 @@ class PairManager:
 
         member = session.add_member(user_id, username)
         logger.info("@%s joined pair session %s", username, session.task_name)
+        await self._save(chat_id)
         return member
 
     async def leave_pair(self, chat_id: int, user_id: int) -> str:
@@ -91,6 +103,7 @@ class PairManager:
             await self.end_pair(chat_id)
             return f"@{username} left. Session ended (no members left)."
 
+        await self._save(chat_id)
         return f"@{username} left the pair session."
 
     async def send_message(
@@ -155,6 +168,7 @@ class PairManager:
         # Format diff summary
         diff = format_diff_summary(changes, username)
 
+        await self._save(chat_id)
         return response, diff
 
     async def set_driver(self, chat_id: int, user_id: int) -> PairSession:
@@ -238,6 +252,7 @@ class PairManager:
         )
         await proc.send_message(intro)
 
+        await self._save(chat_id)
         return context_summary
 
     async def checkpoint(self, chat_id: int, message: str = "") -> str:
@@ -280,6 +295,8 @@ class PairManager:
                 "Focus their requests on this issue."
             )
 
+        await self._save(chat_id)
+
     async def complete_issue(
         self, chat_id: int, issue_number: int, user_id: int
     ) -> str:
@@ -305,6 +322,7 @@ class PairManager:
         result = await proc.send_message(commit_prompt)
         session.complete_issue(issue_number)
         session.touch()
+        await self._save(chat_id)
 
         return result
 
@@ -316,6 +334,9 @@ class PairManager:
         proc = self._processes.pop(chat_id, None)
         if proc:
             await proc.kill()
+
+        from orchestrator.storage.db import delete_pair_session
+        await delete_pair_session(self.db, chat_id)
 
         ok, push_msg = await self.wt.push_branch(session.task_name)
         if not ok:
@@ -332,3 +353,22 @@ class PairManager:
         if pr_ok:
             return f"Session ended. PR: {pr_msg}"
         return f"Session ended. Branch pushed but PR failed: {pr_msg}"
+
+    async def restore_pair_sessions(self) -> int:
+        """Restore pair sessions from database after restart."""
+        from orchestrator.storage.db import load_all_pair_sessions
+        results = await load_all_pair_sessions(self.db)
+        count = 0
+        for session, claude_session_id in results:
+            proc = ClaudeProcess(
+                worktree_path=session.worktree_path,
+                task_name=session.task_name,
+                budget=config.SESSION_BUDGET_USD,
+            )
+            if claude_session_id:
+                proc.session_id = claude_session_id
+            self._sessions[session.chat_id] = session
+            self._processes[session.chat_id] = proc
+            count += 1
+            logger.info("Restored pair session: %s", session.task_name)
+        return count
