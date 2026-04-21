@@ -65,7 +65,7 @@ async def main() -> None:
     # Pair mode handlers registered FIRST — they take priority for message routing.
     # If no pair session is active, messages fall through to split mode.
     issues = GitHubIssues(repo_root=str(config.REPO_ROOT))
-    register_pair(dp, pair_mgr, bot, issues=issues)
+    register_pair(dp, pair_mgr, bot, issues=issues, session_mgr=session_mgr)
     register(dp, session_mgr, bot)
 
     idle_task = asyncio.create_task(idle_checker(session_mgr, bot, chat_id=None))

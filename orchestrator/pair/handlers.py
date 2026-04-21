@@ -19,13 +19,15 @@ pair_router = Router()
 _pair_mgr: PairManager | None = None
 _bot_ref: Bot | None = None
 _issues: GitHubIssues | None = None
+_session_mgr = None
 
 
-def register_pair(dp, pair_mgr: PairManager, bot: Bot, issues: GitHubIssues | None = None) -> None:
-    global _pair_mgr, _bot_ref, _issues
+def register_pair(dp, pair_mgr: PairManager, bot: Bot, issues: GitHubIssues | None = None, session_mgr=None) -> None:
+    global _pair_mgr, _bot_ref, _issues, _session_mgr
     _pair_mgr = pair_mgr
     _bot_ref = bot
     _issues = issues or GitHubIssues(repo_root=str(config.REPO_ROOT))
+    _session_mgr = session_mgr
     dp.include_router(pair_router)
 
 
@@ -439,6 +441,146 @@ async def cmd_endpair(msg: Message) -> None:
         return
 
     await msg.reply(result)
+
+
+@pair_router.message(Command("plan"))
+async def cmd_plan(msg: Message) -> None:
+    assert _pair_mgr
+
+    session = _pair_mgr.get_session(_chat_id(msg))
+    if not session:
+        await msg.reply("No pair session active. Use /pair <task> first.")
+        return
+
+    text = (msg.text or "").strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await msg.reply(
+            "Usage: /plan <product description>\n\n"
+            "Example: /plan Build a todo app with user auth, REST API, and React frontend"
+        )
+        return
+
+    idea = parts[1].strip()
+    await msg.reply(f"Decomposing into tasks...")
+
+    proc = _pair_mgr._processes.get(_chat_id(msg))
+    if not proc:
+        await msg.reply("Session has no process.")
+        return
+
+    try:
+        from orchestrator.planner.decompose import decompose, format_task_board
+        tasks = await decompose(proc, idea)
+    except ValueError as e:
+        await msg.reply(str(e))
+        return
+
+    if not tasks:
+        await msg.reply("No tasks generated. Try a more detailed description.")
+        return
+
+    from orchestrator.storage.db import save_task_board
+    await save_task_board(_pair_mgr.db, _chat_id(msg), tasks)
+
+    board = format_task_board(tasks)
+    for chunk_text in chunk_message(f"Plan created!\n\n{board}\n\nUse /grab #N to claim a task."):
+        await msg.reply(chunk_text)
+
+
+@pair_router.message(Command("board"))
+async def cmd_board(msg: Message) -> None:
+    assert _pair_mgr
+
+    from orchestrator.storage.db import load_task_board
+    from orchestrator.planner.decompose import format_task_board
+
+    tasks = await load_task_board(_pair_mgr.db, _chat_id(msg))
+    if not tasks:
+        await msg.reply("No task board. Use /plan <description> to create one.")
+        return
+
+    board = format_task_board(tasks)
+    for chunk_text in chunk_message(board):
+        await msg.reply(chunk_text)
+
+
+@pair_router.message(Command("grab"))
+async def cmd_grab(msg: Message) -> None:
+    assert _pair_mgr
+
+    text = (msg.text or "").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        await msg.reply("Usage: /grab #N — claim task number N from the board")
+        return
+
+    raw = parts[1].lstrip("#")
+    try:
+        task_id = int(raw)
+    except ValueError:
+        await msg.reply(f"Invalid task number: {parts[1]}")
+        return
+
+    from orchestrator.storage.db import load_task_board, update_task_status
+    from orchestrator.planner.decompose import get_unblocked_tasks
+
+    tasks = await load_task_board(_pair_mgr.db, _chat_id(msg))
+    if not tasks:
+        await msg.reply("No task board. Use /plan <description> first.")
+        return
+
+    task = next((t for t in tasks if t.id == task_id), None)
+    if not task:
+        await msg.reply(f"Task #{task_id} not found on the board.")
+        return
+
+    if task.status == "done":
+        await msg.reply(f"Task #{task_id} is already done.")
+        return
+
+    if task.status == "in_progress":
+        await msg.reply(f"Task #{task_id} is already claimed by @{task.assigned_to}.")
+        return
+
+    done_ids = {t.id for t in tasks if t.status == "done"}
+    pending_blockers = [b for b in task.blocked_by if b not in done_ids]
+    if pending_blockers:
+        blocker_str = ", ".join(f"#{b}" for b in pending_blockers)
+        await msg.reply(f"Task #{task_id} is blocked by {blocker_str}. Complete those first.")
+        return
+
+    username = _username(msg)
+    uid = _user_id(msg)
+
+    await update_task_status(_pair_mgr.db, _chat_id(msg), task_id, "in_progress", username)
+
+    if _session_mgr:
+        task_name = f"task-{task_id}-{task.title.lower().replace(' ', '-')[:20]}"
+        try:
+            session = await _session_mgr.claim(uid, username, task_name)
+            context = (
+                f"You are working on task #{task_id}: {task.title}\n"
+                f"Description: {task.description}\n"
+                f"Files to create/modify: {', '.join(task.files)}\n"
+                f"Stay focused on ONLY these files. Do not modify other files."
+            )
+            await _session_mgr.send_message(uid, context)
+            await msg.reply(
+                f"@{username} grabbed task #{task_id}: {task.title}\n"
+                f"Branch: {session.branch}\n"
+                f"Files: {', '.join(task.files) or 'TBD'}\n\n"
+                "Send messages to work on this task. Use /done when finished."
+            )
+        except ValueError as e:
+            await msg.reply(f"Couldn't start session: {e}")
+            await update_task_status(_pair_mgr.db, _chat_id(msg), task_id, "open", None)
+    else:
+        await msg.reply(
+            f"@{username} grabbed task #{task_id}: {task.title}\n"
+            f"Files: {', '.join(task.files) or 'TBD'}\n\n"
+            "Work on this in your current session."
+        )
 
 
 # Route non-command messages to the pair session (if active)
