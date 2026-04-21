@@ -583,6 +583,84 @@ async def cmd_grab(msg: Message) -> None:
         )
 
 
+@pair_router.message(Command("complete"))
+async def cmd_complete(msg: Message) -> None:
+    """Complete a grabbed task: commit, merge branch, mark done, unblock dependents."""
+    assert _pair_mgr
+
+    text = (msg.text or "").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        await msg.reply("Usage: /complete #N — finish task N, merge, and unblock dependents")
+        return
+
+    raw = parts[1].lstrip("#")
+    try:
+        task_id = int(raw)
+    except ValueError:
+        await msg.reply(f"Invalid task number: {parts[1]}")
+        return
+
+    from orchestrator.storage.db import load_task_board, update_task_status
+    from orchestrator.planner.decompose import format_task_board, get_unblocked_tasks
+
+    tasks = await load_task_board(_pair_mgr.db, _chat_id(msg))
+    task = next((t for t in tasks if t.id == task_id), None)
+    if not task:
+        await msg.reply(f"Task #{task_id} not found.")
+        return
+
+    if task.status == "done":
+        await msg.reply(f"Task #{task_id} is already done.")
+        return
+
+    username = _username(msg)
+    uid = _user_id(msg)
+
+    await msg.reply(f"Completing task #{task_id}: {task.title}...")
+
+    # If dev has a split session, merge it
+    merge_msg = ""
+    if _session_mgr:
+        session = _session_mgr.get_session(uid)
+        if session:
+            try:
+                result = await _session_mgr.merge(uid)
+                if result.pr_url:
+                    merge_msg = f"\nPR: {result.pr_url}"
+                else:
+                    merge_msg = f"\nBranch merged: {result.message}"
+            except ValueError as e:
+                merge_msg = f"\nMerge issue: {e}"
+
+    # Mark task done on the board
+    await update_task_status(_pair_mgr.db, _chat_id(msg), task_id, "done", username)
+
+    # Reload board to check what's newly unblocked
+    tasks = await load_task_board(_pair_mgr.db, _chat_id(msg))
+    newly_unblocked = get_unblocked_tasks(tasks)
+
+    # Build response
+    response = f"Task #{task_id} completed by @{username}!{merge_msg}"
+
+    if newly_unblocked:
+        response += "\n\nNewly unblocked tasks:"
+        for t in newly_unblocked:
+            response += f"\n  #{t.id} {t.title}"
+        response += "\n\nUse /grab #N to claim one."
+
+    # Show progress
+    done_count = sum(1 for t in tasks if t.status == "done")
+    total = len(tasks)
+    response += f"\n\nProgress: {done_count}/{total} tasks done"
+
+    if done_count == total:
+        response += "\n\nAll tasks complete! Use /endpair to finish."
+
+    for chunk_text in chunk_message(response):
+        await msg.reply(chunk_text)
+
+
 # Route non-command messages to the pair session (if active)
 @pair_router.message(F.text & ~F.text.startswith("/"))
 async def route_pair_message(msg: Message) -> None:
