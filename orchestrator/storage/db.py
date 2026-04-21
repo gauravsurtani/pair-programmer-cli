@@ -176,3 +176,74 @@ async def load_all_pair_sessions(db: aiosqlite.Connection):
 async def delete_pair_session(db: aiosqlite.Connection, chat_id: int) -> None:
     await db.execute("DELETE FROM pair_sessions WHERE chat_id = ?", (chat_id,))
     await db.commit()
+
+
+async def save_task_board(db: aiosqlite.Connection, chat_id: int, tasks: list) -> None:
+    """Save all tasks for a chat's task board. Replaces existing tasks."""
+    await db.execute("DELETE FROM task_board WHERE chat_id = ?", (chat_id,))
+    for t in tasks:
+        await db.execute(
+            """INSERT INTO task_board
+               (chat_id, task_id, title, description, files_json, blocked_by_json, assigned_to, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                chat_id,
+                t.id,
+                t.title,
+                t.description,
+                json.dumps(t.files),
+                json.dumps(t.blocked_by),
+                t.assigned_to,
+                t.status,
+            ),
+        )
+    await db.commit()
+
+
+async def load_task_board(db: aiosqlite.Connection, chat_id: int) -> list:
+    """Load all tasks for a chat's task board."""
+    from orchestrator.planner.decompose import Task
+
+    async with db.execute(
+        "SELECT task_id, title, description, files_json, blocked_by_json, assigned_to, status "
+        "FROM task_board WHERE chat_id = ? ORDER BY task_id",
+        (chat_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    tasks = []
+    for row in rows:
+        tasks.append(Task(
+            id=row[0],
+            title=row[1],
+            description=row[2],
+            files=json.loads(row[3]),
+            blocked_by=json.loads(row[4]),
+            assigned_to=row[5],
+            status=row[6],
+        ))
+    return tasks
+
+
+async def update_task_status(
+    db: aiosqlite.Connection, chat_id: int, task_id: int,
+    status: str, assigned_to: str | None = None
+) -> None:
+    """Update a single task's status and optionally its assignee."""
+    if assigned_to is not None:
+        await db.execute(
+            "UPDATE task_board SET status = ?, assigned_to = ? WHERE chat_id = ? AND task_id = ?",
+            (status, assigned_to, chat_id, task_id),
+        )
+    else:
+        await db.execute(
+            "UPDATE task_board SET status = ? WHERE chat_id = ? AND task_id = ?",
+            (status, chat_id, task_id),
+        )
+    await db.commit()
+
+
+async def delete_task_board(db: aiosqlite.Connection, chat_id: int) -> None:
+    """Delete all tasks for a chat."""
+    await db.execute("DELETE FROM task_board WHERE chat_id = ?", (chat_id,))
+    await db.commit()

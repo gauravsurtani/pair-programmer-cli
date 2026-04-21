@@ -29,3 +29,15 @@ CREATE TABLE IF NOT EXISTS pair_sessions (
     active_issues_json TEXT NOT NULL DEFAULT '{}',
     handoff_history_json TEXT NOT NULL DEFAULT '[]'
 );
+
+CREATE TABLE IF NOT EXISTS task_board (
+    chat_id INTEGER NOT NULL,
+    task_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    files_json TEXT NOT NULL DEFAULT '[]',
+    blocked_by_json TEXT NOT NULL DEFAULT '[]',
+    assigned_to TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    PRIMARY KEY (chat_id, task_id)
+);
